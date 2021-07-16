@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2021  Ruby-GNOME Project Team
+# Copyright (C) 2021  Ruby-GNOME Project Team
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -14,22 +14,11 @@
 # License along with this library; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 
-class TestBaseInfo < Test::Unit::TestCase
-  def setup
-    @repository = GObjectIntrospection::Repository.default
-    @repository.require("GObject")
-    @info = @repository.find("GObject", "Object")
-  end
-
-  def test_name
-    assert_equal("Object", @info.name)
-  end
-
-  def test_namespace
-    assert_equal("GObject", @info.namespace)
-  end
-
-  def test_container
-    assert_equal("Object", @info.vfuncs.first.container.name)
+module Pango
+  class FT2Loader < GObjectIntrospection::Loader
+    private
+    def rubyish_class_name(info)
+      "FT2#{super}"
+    end
   end
 end

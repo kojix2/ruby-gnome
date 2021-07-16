@@ -1,6 +1,6 @@
 /* -*- c-file-style: "ruby"; indent-tabs-mode: nil -*- */
 /*
- *  Copyright (C) 2012  Ruby-GNOME2 Project Team
+ *  Copyright (C) 2012-2021  Ruby-GNOME Project Team
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -21,7 +21,7 @@
 #include "rb-gi-private.h"
 
 #define RG_TARGET_NAMESPACE rb_cGICallableInfo
-#define SELF(self) ((GICallableInfo *)(RVAL2GI_BASE_INFO(self)))
+#define SELF(self) RVAL2GI_CALLABLE_INFO(self)
 
 GType
 gi_callable_info_get_type(void)
@@ -33,6 +33,13 @@ gi_callable_info_get_type(void)
                                             (GBoxedFreeFunc)g_base_info_unref);
     }
     return type;
+}
+
+static VALUE
+rg_can_throw_gerror_p(VALUE self)
+{
+    GICallableInfo *info = SELF(self);
+    return CBOOL2RVAL(g_callable_info_can_throw_gerror(info));
 }
 
 static VALUE
@@ -91,6 +98,7 @@ rb_gi_callable_info_init(VALUE rb_mGI, VALUE rb_cGIBaseInfo)
         G_DEF_CLASS_WITH_PARENT(GI_TYPE_CALLABLE_INFO, "CallableInfo", rb_mGI,
                                 rb_cGIBaseInfo);
 
+    RG_DEF_METHOD_P(can_throw_gerror, 0);
     RG_DEF_METHOD(return_type, 0);
     RG_DEF_METHOD(caller_owns, 0);
     RG_DEF_METHOD_P(may_return_null, 0);

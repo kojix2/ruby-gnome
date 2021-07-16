@@ -1,6 +1,6 @@
 /* -*- c-file-style: "ruby"; indent-tabs-mode: nil -*- */
 /*
- *  Copyright (C) 2002-2020  Ruby-GNOME Project Team
+ *  Copyright (C) 2002-2021  Ruby-GNOME Project Team
  *  Copyright (C) 2002,2003  Masahiro Sakai
  *
  *  This library is free software; you can redistribute it and/or
@@ -33,7 +33,7 @@ G_BEGIN_DECLS
 
 #define RBGLIB_MAJOR_VERSION 3
 #define RBGLIB_MINOR_VERSION 4
-#define RBGLIB_MICRO_VERSION 4
+#define RBGLIB_MICRO_VERSION 7
 
 #ifndef RB_ZALLOC
 #  ifdef ZALLOC
@@ -222,6 +222,13 @@ extern VALUE rbg_check_hash_type(VALUE object);
 extern void rbg_scan_options(VALUE options, ...);
 
 /* rbgerror.h */
+typedef enum {
+  RBG_RUBY_ERROR_UNKNOWN,
+} RBGRubyError;
+
+#define RBG_RUBY_ERROR rbgerr_ruby_error_quark()
+extern GQuark rbgerr_ruby_error_quark(void);
+
 extern VALUE rbgerr_gerror2exception(GError *error);
 extern VALUE rbgerr_define_gerror(GQuark domain, const gchar* name, VALUE module, VALUE parent, GType gtype);
 

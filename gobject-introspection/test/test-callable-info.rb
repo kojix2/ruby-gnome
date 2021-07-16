@@ -1,4 +1,4 @@
-# Copyright (C) 2012  Ruby-GNOME2 Project Team
+# Copyright (C) 2012-2021  Ruby-GNOME Project Team
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,12 @@ class TestCallableInfo < Test::Unit::TestCase
     @info = @repository.find("GObject", "signal_name")
   end
 
+  def test_can_throw_gerror
+    assert do
+      not @info.can_throw_gerror?
+    end
+  end
+
   def test_return_type
     assert_kind_of(GObjectIntrospection::TypeInfo,
                    @info.return_type)
@@ -32,7 +38,15 @@ class TestCallableInfo < Test::Unit::TestCase
   end
 
   def test_may_return_null?
-    assert_false(@info.may_return_null?)
+    if GObjectIntrospection::Version.or_later?(1, 67, 0)
+      assert do
+        @info.may_return_null?
+      end
+    else
+      assert do
+        not @info.may_return_null?
+      end
+    end
   end
 
   def test_n_args

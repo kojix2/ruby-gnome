@@ -1,4 +1,4 @@
-# Copyright (C) 2017-2018  Ruby-GNOME2 Project Team
+# Copyright (C) 2017-2021  Ruby-GNOME Project Team
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,9 @@ require "cairo-gobject"
 
 require "pango/loader"
 require "pango/cairo-loader"
+require "pango/fc-loader"
+require "pango/ft2-loader"
+require "pango/ot-loader"
 
 module Pango
   LOG_DOMAIN = "Pango"
@@ -30,4 +33,19 @@ module Pango
 
   cairo_loader = CairoLoader.new(self)
   cairo_loader.load("PangoCairo")
+
+  fc_loader = FcLoader.new(self)
+  begin
+    fc_loader.load("PangoFc")
+  rescue GObjectIntrospection::RepositoryError::TypelibNotFound
+  end
+
+  ft2_loader = FT2Loader.new(self)
+  ft2_loader.load("PangoFT2")
+
+  ot_loader = OTLoader.new(self)
+  begin
+    ot_loader.load("PangoOT")
+  rescue GObjectIntrospection::RepositoryError::TypelibNotFound
+  end
 end

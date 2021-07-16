@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2017  Ruby-GNOME2 Project Team
+# Copyright (C) 2015-2021  Ruby-GNOME Project Team
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -26,11 +26,13 @@ class TestGIOChannel < Test::Unit::TestCase
 
     @file = Tempfile.new("glib2-content")
     @file.open
+    @file.binmode
     @file.print(@content)
     @file.close
 
     @sjis_file = Tempfile.new("glib2-sjis-content")
     @sjis_file.open
+    @sjis_file.binmode
     @sjis_file.print(@sjis_content)
     @sjis_file.close
   end
@@ -64,10 +66,6 @@ class TestGIOChannel < Test::Unit::TestCase
       assert_raises(RuntimeError) do
         assert_equal(@content, io.read)
       end
-    end
-
-    assert_raises(GLib::IOChannelError) do
-      io.close
     end
 
     assert_raises(GLib::FileError) do

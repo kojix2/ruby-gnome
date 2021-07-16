@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2019  Ruby-GNOME Project Team
+# Copyright (C) 2012-2021  Ruby-GNOME Project Team
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -216,6 +216,7 @@ module GObjectIntrospection
       klass = self.class.define_class(info.gtype,
                                       rubyish_class_name(info),
                                       @base_module)
+      load_virtual_functions(info, klass)
       load_fields(info, klass)
       load_methods(info, klass)
     end
@@ -336,6 +337,20 @@ module GObjectIntrospection
       klass.__send__(:define_method, "initialize") do |*arguments, &block|
         initialize.call(self, arguments, block)
       end
+    end
+
+    def load_virtual_functions(info, klass)
+      klass.extend(VirtualFunctionImplementable)
+      gtype_prefix = rubyish_gtype_name(klass.gtype.name)
+      implementor = VirtualFunctionImplementor.new(self.class,
+                                                   gtype_prefix,
+                                                   info.vfuncs)
+      klass.__send__(:initialize_virtual_function_implementable,
+                     implementor)
+    end
+
+    def rubyish_gtype_name(name)
+      name.scan(/[A-Z]+[a-z\d]+/).collect(&:downcase).join("_")
     end
 
     def initialize_post(object)
@@ -546,6 +561,7 @@ module GObjectIntrospection
         self.class.define_interface(info.gtype,
                                     rubyish_class_name(info),
                                     @base_module)
+      load_virtual_functions(info, interface_module)
       load_methods(info, interface_module)
     end
 
@@ -706,6 +722,54 @@ module GObjectIntrospection
           detail << "#{@n_required_in_args}..#{@n_in_args}"
         end
         "#{@full_method_name}: wrong number of arguments (#{detail})"
+      end
+    end
+
+    class VirtualFunctionImplementor
+      def initialize(loader_class, gtype_prefix, infos)
+        @loader_class = loader_class
+        @gtype_prefix = gtype_prefix
+        @infos = {}
+        prefix = GLib::VIRTUAL_FUNCTION_IMPLEMENTATION_PREFIX
+        infos.each do |info|
+          name = info.name
+          @infos[:"#{prefix}#{name}"] = info
+          @infos[:"#{prefix}#{gtype_prefix}_#{name}"] = info
+        end
+      end
+
+      def implement(implementor_gtype, name)
+        info = @infos[name]
+        return false if info.nil?
+        container = info.container
+        vtable_gtype = container.gtype
+        if container.respond_to?(:class_struct)
+          struct = container.class_struct
+        else
+          return false unless implementor_gtype.type_is_a?(vtable_gtype)
+          struct = container.iface_struct
+        end
+        field = struct.find_field(info.name)
+        @loader_class.implement_virtual_function(field,
+                                                 implementor_gtype,
+                                                 vtable_gtype,
+                                                 name.to_s)
+        true
+      end
+    end
+
+    module VirtualFunctionImplementable
+      def initialize_virtual_function_implementable(implementor)
+        @virtual_function_implementor = implementor
+      end
+
+      def implement_virtual_function(implementor_class, name)
+        unless instance_variable_defined?(:@virtual_function_implementor)
+          return false
+        end
+        @virtual_function_implementor.implement(implementor_class.gtype,
+                                                name)
+        true
       end
     end
   end

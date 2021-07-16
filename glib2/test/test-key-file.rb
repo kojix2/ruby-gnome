@@ -32,7 +32,8 @@ class TestGLibKeyFile < Test::Unit::TestCase
       key_file.load_from_dirs("non-existent", search_dirs)
     end
     if GLib.check_version?(2, 31, 2)
-      assert_equal(temp.path, key_file.load_from_dirs(base_name, search_dirs))
+      loaded_path = key_file.load_from_dirs(base_name, search_dirs)
+      assert_equal(temp.path, normalize_path(loaded_path))
     elsif GLib.check_version?(2, 30, 0)
       assert_raise(GLib::KeyFileError::NotFound) do
         key_file.load_from_dirs(base_name, search_dirs)
@@ -47,7 +48,8 @@ class TestGLibKeyFile < Test::Unit::TestCase
 key = value
 EOK
     temp.close
-    assert_equal(temp.path, key_file.load_from_dirs(base_name, search_dirs))
+    loaded_path = key_file.load_from_dirs(base_name, search_dirs)
+    assert_equal(temp.path, normalize_path(loaded_path))
   end
 
   def test_desktop_constants

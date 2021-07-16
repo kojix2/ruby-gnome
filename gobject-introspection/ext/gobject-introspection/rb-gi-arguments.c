@@ -1,6 +1,6 @@
 /* -*- c-file-style: "ruby"; indent-tabs-mode: nil -*- */
 /*
- *  Copyright (C) 2012-2019  Ruby-GNOME Project Team
+ *  Copyright (C) 2012-2021  Ruby-GNOME Project Team
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -23,16 +23,7 @@
 static gboolean
 rb_gi_arg_info_may_be_null(GIArgInfo *arg_info)
 {
-#if GI_CHECK_VERSION(1, 42, 0)
     return g_arg_info_may_be_null(arg_info);
-#else
-    /*
-      GObject Introspection < 1.42 doesn't support "(nullable)" yet.
-      So, we assume that all argument may be NULL. It's danger but
-      convenient.
-    */
-    return TRUE;
-#endif
 }
 
 static gboolean
@@ -506,6 +497,48 @@ rb_gi_arguments_get_rb_out_args(RBGIArguments *args)
     return rb_gi_arguments_out_to_ruby(args);
 }
 
+void
+rb_gi_arguments_fill_raw_out_gerror(RBGIArguments *args,
+                                    VALUE rb_error)
+{
+    if (!g_callable_info_can_throw_gerror(args->info)) {
+        return;
+    }
+
+    gint n_args = g_callable_info_get_n_args(args->info);
+    /* GError ** isn't listed in args. */
+    GError **gerror = *((gpointer *)(args->raw_args[n_args]));
+    VALUE cGLibError = rb_const_get(mGLib, rb_intern("Error"));
+    if (NIL_P(rb_error)) {
+        g_set_error(gerror,
+                    RBG_RUBY_ERROR,
+                    RBG_RUBY_ERROR_UNKNOWN,
+                    "Unknown error");
+    } else {
+        VALUE message = rb_funcall(rb_error, rb_intern("message"), 0);
+        VALUE backtrace = rb_funcall(rb_error, rb_intern("backtrace"), 0);
+        VALUE formatted_backtrace =
+            rb_ary_join(backtrace, rb_str_new_cstr("  \n"));
+        if (CBOOL2RVAL(rb_obj_is_kind_of(rb_error, cGLibError))) {
+            VALUE domain = rb_funcall(rb_error, rb_intern("domain"), 0);
+            VALUE code = rb_funcall(rb_error, rb_intern("code"), 0);
+            g_set_error(gerror,
+                        g_quark_from_string(RVAL2CSTR(domain)),
+                        NUM2INT(code),
+                        "%s\n  %s\n",
+                        RVAL2CSTR(message),
+                        RVAL2CSTR(formatted_backtrace));
+        } else {
+            g_set_error(gerror,
+                        RBG_RUBY_ERROR,
+                        RBG_RUBY_ERROR_UNKNOWN,
+                        "%s\n  %s\n",
+                        RVAL2CSTR(message),
+                        RVAL2CSTR(formatted_backtrace));
+        }
+    }
+}
+
 static void
 rb_gi_arguments_fill_raw_result_interface(RBGIArguments *args,
                                           VALUE rb_result,
@@ -584,6 +617,160 @@ rb_gi_arguments_fill_raw_result_interface(RBGIArguments *args,
     }
 
     g_base_info_unref(interface_info);
+}
+
+static void
+rb_gi_arguments_fill_raw_result_glist_interface(
+    RBGIArguments *args,
+    VALUE rb_result,
+    gpointer raw_result,
+    GITypeInfo *type_info,
+    GITypeInfo *element_type_info,
+    G_GNUC_UNUSED GITransfer transfer /* TODO */,
+    gboolean is_return_value)
+{
+    GIFFIReturnValue *ffi_return_value = raw_result;
+    GIBaseInfo *interface_info;
+    GIInfoType interface_type;
+    const gchar *interface_name;
+    GType gtype;
+    GList *list = NULL;
+
+    interface_info = g_type_info_get_interface(element_type_info);
+    interface_type = g_base_info_get_type(interface_info);
+    interface_name = g_info_type_to_string(interface_type);
+    gtype = g_registered_type_info_get_g_type(interface_info);
+
+    switch (interface_type) {
+    case GI_INFO_TYPE_INVALID:
+    case GI_INFO_TYPE_FUNCTION:
+    case GI_INFO_TYPE_CALLBACK:
+    case GI_INFO_TYPE_STRUCT:
+    case GI_INFO_TYPE_BOXED:
+    case GI_INFO_TYPE_ENUM:
+    case GI_INFO_TYPE_FLAGS:
+      g_base_info_unref(interface_info);
+      g_base_info_unref(element_type_info);
+      rb_raise(rb_eNotImpError,
+               "TODO: %s::%s: out raw result(glist)[interface(%s)](%s)",
+               g_base_info_get_namespace(args->info),
+               g_base_info_get_name(args->info),
+               interface_name,
+               g_type_name(gtype));
+      break;
+    case GI_INFO_TYPE_OBJECT:
+      list = RVAL2GOBJGLIST(rb_result);
+      if (transfer == GI_TRANSFER_EVERYTHING) {
+          g_list_foreach(list, (GFunc)g_object_ref, NULL);
+      }
+      break;
+    case GI_INFO_TYPE_INTERFACE:
+    case GI_INFO_TYPE_CONSTANT:
+    case GI_INFO_TYPE_INVALID_0:
+    case GI_INFO_TYPE_UNION:
+    case GI_INFO_TYPE_VALUE:
+    case GI_INFO_TYPE_SIGNAL:
+    case GI_INFO_TYPE_VFUNC:
+    case GI_INFO_TYPE_PROPERTY:
+    case GI_INFO_TYPE_FIELD:
+    case GI_INFO_TYPE_ARG:
+    case GI_INFO_TYPE_TYPE:
+    case GI_INFO_TYPE_UNRESOLVED:
+      g_base_info_unref(interface_info);
+      g_base_info_unref(element_type_info);
+      rb_raise(rb_eNotImpError,
+               "TODO: %s::%s: out raw result(glist)[interface(%s)](%s)",
+               g_base_info_get_namespace(args->info),
+               g_base_info_get_name(args->info),
+               interface_name,
+               g_type_name(gtype));
+      break;
+    default:
+      g_base_info_unref(interface_info);
+      g_base_info_unref(element_type_info);
+      g_assert_not_reached();
+      break;
+    }
+
+    if (is_return_value) {
+        ffi_return_value->v_ulong = (gulong)list;
+    } else {
+        *((gpointer *)raw_result) = list;
+    }
+}
+
+static void
+rb_gi_arguments_fill_raw_result_glist(RBGIArguments *args,
+                                      VALUE rb_result,
+                                      gpointer raw_result,
+                                      GITypeInfo *type_info,
+                                      GITransfer transfer,
+                                      gboolean is_return_value)
+{
+    GIFFIReturnValue *ffi_return_value = raw_result;
+    GITypeInfo *element_type_info;
+    GITypeTag element_type_tag;
+
+    element_type_info = g_type_info_get_param_type(type_info, 0);
+    element_type_tag = g_type_info_get_tag(element_type_info);
+
+    if (is_return_value) {
+        ffi_return_value->v_ulong = (gulong)NULL;
+    } else {
+        *((gpointer *)raw_result) = NULL;
+    }
+
+    switch (element_type_tag) {
+    case GI_TYPE_TAG_VOID:
+    case GI_TYPE_TAG_BOOLEAN:
+    case GI_TYPE_TAG_INT8:
+    case GI_TYPE_TAG_UINT8:
+    case GI_TYPE_TAG_INT16:
+    case GI_TYPE_TAG_UINT16:
+    case GI_TYPE_TAG_INT32:
+    case GI_TYPE_TAG_UINT32:
+    case GI_TYPE_TAG_INT64:
+    case GI_TYPE_TAG_UINT64:
+    case GI_TYPE_TAG_FLOAT:
+    case GI_TYPE_TAG_DOUBLE:
+    case GI_TYPE_TAG_GTYPE:
+    case GI_TYPE_TAG_UTF8:
+    case GI_TYPE_TAG_FILENAME:
+    case GI_TYPE_TAG_ARRAY:
+      g_base_info_unref(element_type_info);
+      rb_raise(rb_eNotImpError,
+               "TODO: %s::%s: out raw result(GList)[%s]",
+               g_base_info_get_namespace(args->info),
+               g_base_info_get_name(args->info),
+               g_type_tag_to_string(element_type_tag));
+      break;
+    case GI_TYPE_TAG_INTERFACE:
+      rb_gi_arguments_fill_raw_result_glist_interface(
+          args,
+          rb_result,
+          raw_result,
+          type_info,
+          element_type_info,
+          transfer,
+          is_return_value);
+      break;
+    case GI_TYPE_TAG_GLIST:
+    case GI_TYPE_TAG_GSLIST:
+    case GI_TYPE_TAG_GHASH:
+    case GI_TYPE_TAG_ERROR:
+    case GI_TYPE_TAG_UNICHAR:
+      g_base_info_unref(element_type_info);
+      rb_raise(rb_eNotImpError,
+               "TODO: %s::%s: out raw result(GList)[%s]",
+               g_base_info_get_namespace(args->info),
+               g_base_info_get_name(args->info),
+               g_type_tag_to_string(element_type_tag));
+      break;
+    default:
+      g_base_info_unref(element_type_info);
+      g_assert_not_reached();
+      break;
+    }
 }
 
 /*
@@ -704,12 +891,16 @@ rb_gi_arguments_fill_raw_result(RBGIArguments *args,
         }
         break;
       case GI_TYPE_TAG_UTF8:
-        if (is_return_value) {
-            ffi_return_value->v_ulong =
-                (gulong)RVAL2CSTR_ACCEPT_SYMBOL(rb_result);
-        } else {
-            *((gchar **)raw_result) =
-                (gchar *)RVAL2CSTR_ACCEPT_SYMBOL(rb_result);
+        {
+            gchar *result = (gchar *)RVAL2CSTR_ACCEPT_SYMBOL(rb_result);
+            if (transfer == GI_TRANSFER_EVERYTHING) {
+                result = g_strdup(result);
+            }
+            if (is_return_value) {
+                ffi_return_value->v_ulong = (gulong)result;
+            } else {
+                *((gchar **)raw_result) = (gchar *)result;
+            }
         }
         break;
       case GI_TYPE_TAG_FILENAME:
@@ -748,6 +939,13 @@ rb_gi_arguments_fill_raw_result(RBGIArguments *args,
                                                   is_return_value);
         break;
       case GI_TYPE_TAG_GLIST:
+        rb_gi_arguments_fill_raw_result_glist(args,
+                                              rb_result,
+                                              raw_result,
+                                              type_info,
+                                              transfer,
+                                              is_return_value);
+        break;
       case GI_TYPE_TAG_GSLIST:
       case GI_TYPE_TAG_GHASH:
         rb_raise(rb_eNotImpError,
@@ -842,7 +1040,7 @@ rb_gi_arguments_fill_raw_results(RBGIArguments *args,
         rb_gi_arguments_fill_raw_result(args,
                                         RARRAY_AREF(rb_results, i_rb_result),
                                         argument->v_pointer,
-                                        return_type_info,
+                                        type_info,
                                         transfer,
                                         FALSE);
         i_rb_result++;

@@ -9,26 +9,15 @@ jobs:
       fail-fast: false
       matrix:
         ruby-version:
-          - "2.5"
           - "2.6"
           - "2.7"
           - "3.0"
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions/setup-ruby@v1
+      - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby-version }}
-      - name: Update MSYS2 keyring
-        run: |
-          # https://www.msys2.org/news/#2020-06-29-new-packagers
-          Invoke-WebRequest `
-            -Uri https://repo.msys2.org/msys/x86_64/msys2-keyring-r21.b39fb11-1-any.pkg.tar.xz `
-            -OutFile msys2-keyring-r21.b39fb11-1-any.pkg.tar.xz
-          ridk exec pacman `
-            --noconfirm `
-            --upgrade `
-            msys2-keyring-r21.b39fb11-1-any.pkg.tar.xz
       - name: Update MSYS2
         run: |
           ridk exec pacman -Syu --noconfirm
@@ -42,7 +31,11 @@ jobs:
       - name: Build
         run: |
           bundle exec ruby -rdevkit -S rake build
-      # TODO
-      # - name: Test
-      #   run: |
-      #     bundle exec ruby -rdevkit -S rake test
+      - name: "Test: glib2"
+        run: |
+          cd glib2
+          bundle exec ruby -rdevkit test/run-test.rb
+      - name: "Test: gobject-introspection"
+        run: |
+          cd gobject-introspection
+          bundle exec ruby -rdevkit test/run-test.rb

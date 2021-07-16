@@ -1,6 +1,6 @@
 /* -*- c-file-style: "ruby"; indent-tabs-mode: nil -*- */
 /*
- *  Copyright (C) 2012-2019  Ruby-GNOME Project Team
+ *  Copyright (C) 2012-2021  Ruby-GNOME Project Team
  *
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
@@ -27,13 +27,7 @@ rb_gi_callback_data_destroy_notify(gpointer data)
     rb_gi_callback_data_free(callback_data);
 }
 
-typedef struct {
-    RBGIArguments *args;
-    RBGICallback *callback;
-    RBGICallbackData *callback_data;
-} RBGICallbackInvokeData;
-
-static VALUE
+VALUE
 rb_gi_arguments_in_to_ruby(RBGIArguments *args)
 {
     VALUE rb_in_args;
@@ -66,85 +60,6 @@ rb_gi_arguments_in_to_ruby(RBGIArguments *args)
     }
 
     return rb_in_args;
-}
-
-static VALUE
-rb_gi_callback_invoke(VALUE user_data)
-{
-    RBGICallbackInvokeData *data = (RBGICallbackInvokeData *)user_data;
-    ID id_call;
-    VALUE rb_callback = rb_gi_callback_data_get_rb_callback(data->callback_data);
-    VALUE rb_args = rb_gi_arguments_in_to_ruby(data->args);
-
-    CONST_ID(id_call, "call");
-    return rb_funcallv(rb_callback,
-                       id_call,
-                       RARRAY_LENINT(rb_args),
-                       RARRAY_CONST_PTR(rb_args));
-}
-
-static void
-rb_gi_ffi_closure_callback(G_GNUC_UNUSED ffi_cif *cif,
-                           void *return_value,
-                           void **raw_args,
-                           void *data)
-{
-    RBGICallback *callback = data;
-    RBGICallbackData *callback_data = NULL;
-    RBGIArguments args;
-    VALUE rb_results;
-
-    rb_gi_arguments_init(&args,
-                         callback->callback_info,
-                         Qnil,
-                         Qnil,
-                         raw_args);
-    {
-        guint i;
-
-        for (i = 0; i < args.metadata->len; i++) {
-            RBGIArgMetadata *metadata;
-
-            metadata = g_ptr_array_index(args.metadata, i);
-            if (!metadata->closure_p) {
-                continue;
-            }
-
-            callback_data = *((RBGICallbackData **)(raw_args[i]));
-            break;
-        }
-
-        if (!callback_data && args.metadata->len > 0) {
-            RBGIArgMetadata *metadata;
-
-            i = args.metadata->len - 1;
-            metadata = g_ptr_array_index(args.metadata, i);
-            if (metadata->type.tag == GI_TYPE_TAG_VOID &&
-                metadata->type.pointer_p &&
-                strcmp(metadata->name, "data") == 0) {
-                callback_data = *((RBGICallbackData **)(raw_args[i]));
-            }
-        }
-    }
-
-    {
-        RBGICallbackInvokeData data;
-        data.args = &args;
-        data.callback = callback;
-        data.callback_data = callback_data;
-        rb_results = rbgutil_invoke_callback(rb_gi_callback_invoke,
-                                             (VALUE)&data);
-    }
-    rb_gi_arguments_fill_raw_results(&args, rb_results, return_value);
-    rb_gi_arguments_clear(&args);
-
-    {
-        RBGIArgMetadata *callback_metadata =
-            rb_gi_callback_data_get_metadata(callback_data);
-        if (callback_metadata->scope_type == GI_SCOPE_TYPE_ASYNC) {
-            rb_gi_callback_data_free(callback_data);
-        }
-    }
 }
 
 static void
@@ -187,14 +102,11 @@ rb_gi_arguments_in_init_arg_ruby_callback(RBGIArguments *args,
     if (callback_function) {
         callback_argument->v_pointer = callback_function;
     } else {
-        callback = RB_ZALLOC(RBGICallback);
-        callback->type_info = g_arg_info_get_type(arg_info);
-        callback->callback_info = g_type_info_get_interface(callback->type_info);
-        callback->closure =
-            g_callable_info_prepare_closure(callback->callback_info,
-                                            &(callback->cif),
-                                            rb_gi_ffi_closure_callback,
-                                            callback);
+        GITypeInfo *type_info = g_arg_info_get_type(arg_info);
+        GICallbackInfo *callback_info = g_type_info_get_interface(type_info);
+        callback = rb_gi_callback_new(callback_info, NULL);
+        g_base_info_unref(callback_info);
+        g_base_info_unref(type_info);
         callback_argument->v_pointer = callback->closure;
     }
 
@@ -682,7 +594,7 @@ rb_gi_arguments_in_init_arg_ruby_array_c_gtype(RBGIArguments *args,
     raw_array = ALLOC_N(GType, n_elements);
     for (i = 0; i < n_elements; i++) {
         VALUE rb_type = RARRAY_AREF(rb_array, i);
-        raw_array[i] = rbgobj_gtype_get(rb_type);
+        raw_array[i] = rbgobj_gtype_from_ruby(rb_type);
     }
 
     rb_gi_arguments_in_init_arg_ruby_array_c_generic(args,
@@ -1007,7 +919,7 @@ rb_gi_arguments_in_init_arg_ruby_array_c(RBGIArguments *args,
         /* Workaround for rsvg_handle_set_stylesheet():
            https://gitlab.gnome.org/GNOME/librsvg/-/issues/596 */
         if (strcmp(metadata->name, "css") == 0) {
-            metadata->in_arg->v_pointer = RVAL2CSTR(rb_arg);
+            metadata->in_arg->v_pointer = (char *)RVAL2CSTR(rb_arg);
             rb_gi_arguments_in_init_arg_ruby_array_set_length(args,
                                                               metadata,
                                                               RSTRING_LEN(rb_arg));
@@ -2060,13 +1972,30 @@ rb_gi_arguments_in_init_arg_ruby(RBGIArguments *args,
       case GI_TYPE_TAG_UNICHAR:
         {
             gunichar *target;
+            VALUE rb_unichar;
             if (metadata->direction == GI_DIRECTION_INOUT) {
                 target = ALLOC(gunichar);
                 metadata->in_arg->v_pointer = target;
             } else {
                 target = &(metadata->in_arg->v_uint32);
             }
-            *target = NUM2UINT(metadata->rb_arg);
+            if (RB_TYPE_P(metadata->rb_arg, RUBY_T_STRING)) {
+                VALUE rb_codepoints;
+                if (rb_str_strlen(metadata->rb_arg) != 1) {
+                    rb_raise(rb_eArgError,
+                             "[%s][%s] must be one character: %+" PRIsVALUE,
+                             metadata->name,
+                             g_type_tag_to_string(metadata->type.tag),
+                             metadata->rb_arg);
+                }
+                rb_codepoints = rb_funcall(metadata->rb_arg,
+                                           rb_intern("codepoints"),
+                                           0);
+                rb_unichar = RARRAY_PTR(rb_codepoints)[0];
+            } else {
+                rb_unichar = metadata->rb_arg;
+            }
+            *target = NUM2UINT(rb_unichar);
         }
         break;
       default:
